@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+var (
+	ErrorNilResult = errors.New("the batch function returned nil")
+	ErrorNoResult  = errors.New("the batch function not return any result")
+)
+
 // Interface is a `DataLoader` Interface which defines a public API for loading data from a particular
 // data back-end with unique keys such as the `id` column of a SQL table or
 // document name in a MongoDB database, given a batch loading function.
@@ -32,7 +37,7 @@ type Interface[K comparable, V any] interface {
 // It's important that the length of the input keys matches the length of the output results.
 //
 // The keys passed to this function are guaranteed to be unique
-type BatchFunc[K comparable, V any] func(context.Context, []K) []*Result[V]
+type BatchFunc[K comparable, V any] func(context.Context, []*OneRequest[K, V])
 
 // Result is the data structure that a BatchFunc returns.
 // It contains the resolved data, and any errors that may have occurred while fetching the data.
@@ -111,9 +116,17 @@ type Thunk[V any] func() (V, error)
 type ThunkMany[V any] func() ([]V, []error)
 
 // type used to on input channel
-type batchRequest[K comparable, V any] struct {
-	key     K
-	channel chan *Result[V]
+type OneRequest[K comparable, V any] struct {
+	key    K
+	onDone func(*Result[V])
+}
+
+func (r *OneRequest[K, V]) Key() K {
+	return r.key
+}
+
+func (r *OneRequest[K, V]) OnDone(result *Result[V]) {
+	r.onDone(result)
 }
 
 // Option allows for configuration of Loader fields.
@@ -205,7 +218,8 @@ func (l *Loader[K, V]) Load(originalContext context.Context, key K) Thunk[V] {
 
 	c := make(chan *Result[V], 1)
 	var result struct {
-		mu    sync.RWMutex
+		// mu    sync.RWMutex
+		once  sync.Once
 		value *Result[V]
 	}
 
@@ -218,23 +232,18 @@ func (l *Loader[K, V]) Load(originalContext context.Context, key K) Thunk[V] {
 	}
 
 	thunk := func() (V, error) {
-		result.mu.RLock()
-		resultNotSet := result.value == nil
-		result.mu.RUnlock()
-
-		if resultNotSet {
-			result.mu.Lock()
-			if v, ok := <-c; ok {
-				result.value = v
+		result.once.Do(func() {
+			result.value = <-c
+			if result.value == nil {
+				l.Clear(ctx, key)
+				result.value = &Result[V]{Error: ErrorNilResult}
+				return
 			}
-			result.mu.Unlock()
-		}
-		result.mu.RLock()
-		defer result.mu.RUnlock()
-		var ev *PanicErrorWrapper
-		if result.value.Error != nil && errors.As(result.value.Error, &ev) {
-			l.Clear(ctx, key)
-		}
+			var ev *PanicErrorWrapper
+			if result.value.Error != nil && errors.As(result.value.Error, &ev) {
+				l.Clear(ctx, key)
+			}
+		})
 		return result.value.Data, result.value.Error
 	}
 	defer finish(thunk)
@@ -244,7 +253,9 @@ func (l *Loader[K, V]) Load(originalContext context.Context, key K) Thunk[V] {
 
 	// this is sent to batch fn. It contains the key and the channel to return
 	// the result on
-	req := &batchRequest[K, V]{key, c}
+	req := &OneRequest[K, V]{key, func(r *Result[V]) {
+		c <- r
+	}}
 
 	l.batchLock.Lock()
 	// start the batch window if it hasn't already started.
@@ -386,7 +397,7 @@ func (l *Loader[K, V]) reset() {
 }
 
 type batcher[K comparable, V any] struct {
-	input    chan *batchRequest[K, V]
+	input    chan *OneRequest[K, V]
 	batchFn  BatchFunc[K, V]
 	finished bool
 	silent   bool
@@ -397,7 +408,7 @@ type batcher[K comparable, V any] struct {
 // all the batcher methods must be protected by a global batchLock
 func (l *Loader[K, V]) newBatcher(silent bool, tracer Tracer[K, V]) *batcher[K, V] {
 	return &batcher[K, V]{
-		input:   make(chan *batchRequest[K, V], l.inputCap),
+		input:   make(chan *OneRequest[K, V], l.inputCap),
 		batchFn: l.batchFn,
 		silent:  silent,
 		tracer:  tracer,
@@ -416,18 +427,25 @@ func (b *batcher[K, V]) end() {
 func (b *batcher[K, V]) batch(originalContext context.Context) {
 	var (
 		keys     = make([]K, 0)
-		reqs     = make([]*batchRequest[K, V], 0)
-		items    = make([]*Result[V], 0)
+		reqs     = make([]*OneRequest[K, V], 0)
 		panicErr interface{}
 	)
 
 	for item := range b.input {
+		// Ensure OnDone is called only once
+		once := sync.Once{}
+		originalOnDone := item.onDone
+		item.onDone = func(r *Result[V]) {
+			once.Do(func() {
+				originalOnDone(r)
+			})
+		}
 		keys = append(keys, item.key)
 		reqs = append(reqs, item)
 	}
 
 	ctx, finish := b.tracer.TraceBatch(originalContext, keys)
-	defer finish(items)
+	defer finish()
 
 	func() {
 		defer func() {
@@ -442,51 +460,32 @@ func (b *batcher[K, V]) batch(originalContext context.Context) {
 				log.Printf("Dataloader: Panic received in batch function: %v\n%s", panicErr, buf)
 			}
 		}()
-		items = b.batchFn(ctx, keys)
+		b.batchFn(ctx, reqs)
 	}()
 
 	if panicErr != nil {
 		for _, req := range reqs {
-			req.channel <- &Result[V]{Error: &PanicErrorWrapper{panicError: fmt.Errorf("Panic received in batch function: %v", panicErr)}}
-			close(req.channel)
+			req.onDone(&Result[V]{Error: &PanicErrorWrapper{panicError: fmt.Errorf("panic received in batch function: %v", panicErr)}})
 		}
 		return
 	}
 
-	if len(items) != len(keys) {
-		err := &Result[V]{Error: fmt.Errorf(`
-			The batch function supplied did not return an array of responses
-			the same length as the array of keys.
-
-			Keys:
-			%v
-
-			Values:
-			%v
-		`, keys, items)}
-
-		for _, req := range reqs {
-			req.channel <- err
-			close(req.channel)
-		}
-
-		return
-	}
-
-	for i, req := range reqs {
-		req.channel <- items[i]
-		close(req.channel)
+	for _, req := range reqs {
+		// Notify requests if the batch function did not return results
+		req.onDone(&Result[V]{Error: ErrorNoResult})
 	}
 }
 
 // wait the appropriate amount of time for the provided batcher
 func (l *Loader[K, V]) sleeper(b *batcher[K, V], close chan bool) {
+	timer := time.NewTimer(l.wait)
+	defer timer.Stop()
 	select {
 	// used by batch to close early. usually triggered by max batch size
 	case <-close:
 		return
 	// this will move this goroutine to the back of the callstack?
-	case <-time.After(l.wait):
+	case <-timer.C:
 	}
 
 	// reset

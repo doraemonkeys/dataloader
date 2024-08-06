@@ -50,12 +50,12 @@ func (t Tracer[K, V]) TraceLoadMany(ctx context.Context, keys []K) (context.Cont
 }
 
 // TraceBatch will trace a call to dataloader.LoadMany with Open Tracing.
-func (t Tracer[K, V]) TraceBatch(ctx context.Context, keys []K) (context.Context, dataloader.TraceBatchFinishFunc[V]) {
+func (t Tracer[K, V]) TraceBatch(ctx context.Context, keys []K) (context.Context, dataloader.TraceBatchFinishFunc) {
 	spanCtx, span := t.Tracer().Start(ctx, "Dataloader: batch")
 
 	span.SetAttributes(attribute.String("dataloader.keys", fmt.Sprintf("%v", keys)))
 
-	return spanCtx, func(results []*dataloader.Result[V]) {
+	return spanCtx, func() {
 		span.End()
 	}
 }

@@ -1,4 +1,4 @@
-package no_cache_test
+package main
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	dataloader "github.com/graph-gophers/dataloader/v7"
 )
 
-func ExampleNoCache() {
+func main() {
 	type User struct {
 		ID        int
 		Email     string

@@ -59,13 +59,10 @@ func ExampleTTLCache() {
 		5: {ID: 5, FirstName: "John", LastName: "Smith", Email: "john@example.com"},
 	}
 
-	batchFunc := func(_ context.Context, keys []int) []*dataloader.Result[*User] {
-		var results []*dataloader.Result[*User]
-		// do some pretend work to resolve keys
-		for _, k := range keys {
-			results = append(results, &dataloader.Result[*User]{Data: m[k]})
+	batchFunc := func(_ context.Context, reqs []*dataloader.OneRequest[int, *User]) {
+		for _, req := range reqs {
+			req.OnDone(&dataloader.Result[*User]{Data: m[req.Key()]})
 		}
-		return results
 	}
 
 	// go-cache will automatically cleanup expired items on given duration
