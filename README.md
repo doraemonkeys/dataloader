@@ -4,7 +4,7 @@
 
 This is an implementation of [Facebook's DataLoader](https://github.com/facebook/dataloader) in Golang.
 
-Forked from [graph-gophers/dataloader](github.com/graph-gophers/dataloader).
+Forked from [graph-gophers/dataloader](https://github.com/graph-gophers/dataloader).
 
 ## Install
 ```bash
