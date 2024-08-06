@@ -95,5 +95,5 @@ and drop build tags for older versions of Go (1.9).
 The preferred import method includes the major version tag.
 
 ```go
-import "github.com/graph-gophers/dataloader/v6"
+import "github.com/doraemonkeys/dataloader/v6"
 ```

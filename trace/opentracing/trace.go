@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/graph-gophers/dataloader/v7"
+	"github.com/doraemonkeys/dataloader/v7"
 
 	"github.com/opentracing/opentracing-go"
 )

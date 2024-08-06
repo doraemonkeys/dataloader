@@ -1,11 +1,11 @@
 # DataLoader
-[![GoDoc](https://godoc.org/gopkg.in/graph-gophers/dataloader.v7?status.svg)](https://pkg.go.dev/github.com/graph-gophers/dataloader/v7)
+[![GoDoc](https://godoc.org/gopkg.in/graph-gophers/dataloader.v7?status.svg)](https://pkg.go.dev/github.com/doraemonkeys/dataloader/v7)
 [![Build Status](https://travis-ci.org/graph-gophers/dataloader.svg?branch=master)](https://travis-ci.org/graph-gophers/dataloader)
 
 This is an implementation of [Facebook's DataLoader](https://github.com/facebook/dataloader) in Golang.
 
 ## Install
-`go get -u github.com/graph-gophers/dataloader`
+`go get -u github.com/doraemonkeys/dataloader`
 
 ## Usage
 ```go

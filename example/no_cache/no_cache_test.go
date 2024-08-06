@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	dataloader "github.com/graph-gophers/dataloader/v7"
+	dataloader "github.com/doraemonkeys/dataloader/v7"
 )
 
 func ExampleNoCache() {

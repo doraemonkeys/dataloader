@@ -1,4 +1,4 @@
-module github.com/graph-gophers/dataloader/v7
+module github.com/doraemonkeys/dataloader/v7
 
 go 1.18
 
